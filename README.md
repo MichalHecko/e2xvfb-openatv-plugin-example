@@ -1,5 +1,7 @@
+> Forked from https://github.com/technic/enigma2_example
+
 # Enigma2 plugins development in VS Code with Docker
-This setup allows to easily develop python [enimga2](https://openpli.org/) plugins under Windows or Linux. In this guide I will explain how it works.
+This setup allows to easily develop python [enimga2](https://www.opena.tv) plugins under Windows or Linux. In this guide I will explain how it works.
 
 This guide may become obsolete because of new [feature](https://code.visualstudio.com/blogs/2019/05/02/remote-development).
 
@@ -30,7 +32,7 @@ If you are not familiar with VS Code yet the main point is to learn `Ctrl+Shift+
 You will notice that there is a `.vscode` folder created in your workspace, with the settings. We will modify them later.
 
 ## IDE Source navigation
-Download enigma2 source code from [git](https://github.com/OpenPLi/enigma2). For example put it adjacent to the project workspace root location. Create the `.env` file in order to tell the IDE where it can find necessary imports. In my case the relative path is:
+Download enigma2 source code from [git](https://github.com/openatv/enigma2). For example put it adjacent to the project workspace root location. Create the `.env` file in order to tell the IDE where it can find necessary imports. In my case the relative path is:
 ```
 PYTHONPATH=../enigma2/lib/python;../enigma2
 ```
@@ -44,15 +46,8 @@ It is easier to write something meaningful now.
 
 ## Spinning up enigma2
 
-### Base container
-First we will need an enigma2 container. Complete `Dockerfile` for the base image you can find in the [repository](https://github.com/technic/e2xvfb). It builds enigma2 with SDL support and allows to start it under headless [Xvfb](https://en.wikipedia.org/wiki/Xvfb) XServer.
+Everything is prepared and ready thanks to Docker Compose file (already included).
 
-We need to extend this image, so lets create a new `Dockerfile`:
-```Dockerfile
-FROM technic93/e2xvfb:latest
-CMD [ "x11vnc", "-forever" ]
-```
-At the moment it only defines that we run `x11vnc` for exposing enigma2 GUI. To utilize it we write a `docker-compose.yml`:
 ```yml
 version: '2'
 services:
@@ -62,98 +57,40 @@ services:
       context: .
     ports:
       - 5900:5900
-      - 5678:5678
     volumes:
       - './src:/usr/lib/enigma2/python/Plugins/Extensions/Example'
 ```
-Here we expose VNC and debugger ports and mount our source code to the Plugins directory. We can start it with "Docker: Compose Up". Now it is possible to connect to `localhost:5900` with a VNC client and see a XServer's black screen. You can bring up enigma2 there by `docker exec -it enigma2 /usr/bin/enigma2`. You should be able to navigate enigma2 menu ("space" button) and find your plugin.
+
+Just bring it up and leave it running:
+```bash
+docker compose -f docker-compose.yml up --build -d
+```
+
+Then spin it up:
+```bash
+docker exec -it enigma2 enigma2
+```
+
+> After language selection you have to run enigma2 with command above once again
+
+
+And connect with your favorite VNC client (TigerVNC) to `localhost:5900`.
+
+Enjoy.
+
+## Navigation
+CTRL + SPACE  --> MENU
+ESC           --> EXIT
+F1 - F4       --> RED, GREEN, YELLOW, BLUE buttons
+...
+
+<p align="center">
+  <img height="200px" src="doc/completion.png"/>
+  <img height="400px" src="doc/plugin_1.png"/>
+  <img height="400px" src="doc/plugin_2.png"/>
+</p>
 
 ### Adding debugger
-VS Code provides the `ptvsd` package which can intercept python interpreter and will listen on port `5678` for the IDE to start debug session. Let's add it to the container:
-```Dockerfile
-RUN pip install ptvsd
-EXPOSE 5678
-COPY mytest-ptvsd.py /opt/mytest-ptvsd.py
-```
 
-The `mytest-ptvsd.py` initializes debugger and then calls usual enigma2 "main function"
-```python
-from __future__ import print_function
-import ptvsd
+> TO BE DONE LATER
 
-if __name__ == "__main__":
-    print("mytest-ptvsd: Enable debugger")
-    ptvsd.enable_attach(address=('0.0.0.0', 5678), redirect_output=True)
-    print("mytest-ptvsd: Waiting debugger...")
-    ptvsd.wait_for_attach()
-    print("mytest-ptvsd: Debugger connected")
-    import mytest  # start enigma2
-```
-
-Print functions are there for special purpose, which I will tell you right in the next paragraph. Don't forget to restart container to apply all changes to Dockerfile.
-
-We will add a task to VS Code that will start enigma2 in the background so we can attach a debugging session. The following entry is required in `.vscode/tasks.json`.
-```json5
-{
-    "label": "Docker start enigma2",
-    "type": "process",
-    "presentation": {
-        "reveal": "always"
-    },
-    "isBackground": true,
-    "command": "docker",
-    "args": [
-        "exec",
-        "-it",
-        "-e",
-        "ENIGMA_DEBUG_LVL=5",
-        "enigma2",
-        "/usr/bin/enigma2",
-        "/opt/mytest-ptvsd.py"
-    ],
-    "problemMatcher": {
-        "background": {
-            "beginsPattern": {
-                "regexp": "^mytest-ptvsd: Enable debugger"
-            },
-            "endsPattern": {
-                "regexp": "^mytest-ptvsd: Waiting debugger..."
-            }
-        },
-        "pattern": [
-            {
-                "regexp": "^$",
-                "file": 1,
-                "location": 2,
-                "message": 3
-            }
-        ]
-    }
-}
-```
-Here we set up a `docker exec` command which we already familiar with. The crucial part is `isBackground` and the `problemMatcher` settings.  By `beginsPattern` and `endsPattern` we specify when the process should go to background. After "Waiting debugger..." is printed it is possible to attach. This means that we can go to the background and allow launching of IDE debugger, defined below.
-
-*NOTE*: the `pattern` option is required by VS Code, so we put some dummy things there.
-
-Finally, add the following to `.vscode/launch.json`. Actually, most of this can be created by navigating VS Code command menus.
-```json5
-{
-    "name": "Attach to enigma2",
-    "type": "python",
-    "request": "attach",
-    "pathMappings": [
-        {
-            "localRoot": "${workspaceRoot}\\src",
-            "remoteRoot": "/usr/lib/enigma2/python/Plugins/Extensions/Example",
-        },
-    ],
-    "port": 5678,
-    "host": "localhost",
-    "justMyCode": false, // Need this because our code is under /usr/lib
-    "preLaunchTask": "Docker start enigma2",
-    "postDebugTask": "Docker kill enigma2",
-}
-```
-It is important to add correct `pathMappings` and pre/post tasks that we defined earlier, so that we can start debug with *F5*. 
-
-![](https://raw.githubusercontent.com/technic/enigma2_example/master/doc/Debug.png)
